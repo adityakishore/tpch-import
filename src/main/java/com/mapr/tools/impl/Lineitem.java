@@ -13,7 +13,6 @@ import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.TableExistsException;
-import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.HBaseAdmin;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.util.Bytes;
@@ -28,31 +27,48 @@ public final class Lineitem extends Configured implements TableCreator, PutBuild
 
   private static final byte[] FAMILY_1 = "F".getBytes();
   private static final byte[] FAMILY_2 = "G".getBytes();
-  
+
   private static final String[] FULL_COLUMNS = {"l_quantity", "l_extendedprice", "l_discount", "l_tax", "l_returnflag", "l_linestatus", "l_commitdate", "l_receiptdate", "l_shipinstruct", "l_shipmode", "l_comment"};
 
   private static final String[] SHORT_COLUMNS = {"A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K"};
-  
-  private static final String[] COLUMNS = SHORT_COLUMNS;
-  
-  private static final byte[] L_QUANTITY = COLUMNS[0].getBytes();
-  private static final byte[] L_EXTENDEDPRICE = COLUMNS[1].getBytes();
-  private static final byte[] L_DISCOUNT = COLUMNS[2].getBytes();
-  private static final byte[] L_TAX = COLUMNS[3].getBytes();
-  private static final byte[] L_RETURNFLAG = COLUMNS[4].getBytes();
-  private static final byte[] L_LINESTATUS = COLUMNS[5].getBytes();
-  private static final byte[] L_COMMITDATE = COLUMNS[6].getBytes();
-  private static final byte[] L_RECEIPTDATE = COLUMNS[7].getBytes();
-  private static final byte[] L_SHIPINSTRUCT = COLUMNS[8].getBytes();
-  private static final byte[] L_SHIPMODE = COLUMNS[9].getBytes();
-  private static final byte[] L_COMMENT = COLUMNS[10].getBytes();
+
+  private final String[] COLUMNS;
+
+  private final byte[] L_QUANTITY;
+  private final byte[] L_EXTENDEDPRICE;
+  private final byte[] L_DISCOUNT;
+  private final byte[] L_TAX;
+  private final byte[] L_RETURNFLAG;
+  private final byte[] L_LINESTATUS;
+  private final byte[] L_COMMITDATE;
+  private final byte[] L_RECEIPTDATE;
+  private final byte[] L_SHIPINSTRUCT;
+  private final byte[] L_SHIPMODE;
+  private final byte[] L_COMMENT;
 
   public Lineitem() {
-    super(HBaseConfiguration.create());
+    this(HBaseConfiguration.create());
   }
 
   public Lineitem(Configuration conf) {
     super(conf);
+
+    if (getConf().getBoolean("lineitem.full_columns", false)) {
+      COLUMNS = FULL_COLUMNS;
+    } else {
+      COLUMNS = SHORT_COLUMNS;
+    }
+    L_QUANTITY = COLUMNS[0].getBytes();
+    L_EXTENDEDPRICE = COLUMNS[1].getBytes();
+    L_DISCOUNT = COLUMNS[2].getBytes();
+    L_TAX = COLUMNS[3].getBytes();
+    L_RETURNFLAG = COLUMNS[4].getBytes();
+    L_LINESTATUS = COLUMNS[5].getBytes();
+    L_COMMITDATE = COLUMNS[6].getBytes();
+    L_RECEIPTDATE = COLUMNS[7].getBytes();
+    L_SHIPINSTRUCT = COLUMNS[8].getBytes();
+    L_SHIPMODE = COLUMNS[9].getBytes();
+    L_COMMENT = COLUMNS[10].getBytes();
   }
 
   public Put build(ParsedLine parsed) {
@@ -66,23 +82,24 @@ public final class Lineitem extends Configured implements TableCreator, PutBuild
     double l_tax            = Double.valueOf(parsed.getColumn(7));
     byte[] l_returnflag     = parsed.getColumnBytes(8);
     byte[] l_linestatus     = parsed.getColumnBytes(9);
-    int    l_shipdate       = (int) (Date.valueOf(parsed.getColumn(10)).getTime() / MILLIS_IN_DAY);
-    int    l_commitdate     = (int) (Date.valueOf(parsed.getColumn(11)).getTime() / MILLIS_IN_DAY);
-    int    l_receiptdate    = (int) (Date.valueOf(parsed.getColumn(12)).getTime() / MILLIS_IN_DAY);
+    long   l_shipdate       = (Date.valueOf(parsed.getColumn(10)).getTime());
+    long   l_commitdate     = (Date.valueOf(parsed.getColumn(11)).getTime());
+    long   l_receiptdate    = (Date.valueOf(parsed.getColumn(12)).getTime());
     byte[] l_shipinstruct   = parsed.getColumnBytes(13);
     byte[] l_shipmode       = parsed.getColumnBytes(14);
     byte[] l_comment        = parsed.getColumnBytes(15);
 
     // encode row_key
     ByteBuffer row_key = ByteBuffer
-        .wrap(new byte[4+4+4+4+4]) // 4(l_shipdate) + 4(l_orderkey) + 4(l_linenumber) + 4(l_partkey) + 4(l_suppley)
+        .wrap(new byte[8+4+1+4+4]) // 8(l_shipdate) + 4(l_orderkey) + 1(l_linenumber) + 4(l_partkey) + 4(l_suppley)
         .order(ByteOrder.BIG_ENDIAN);
-    row_key.putInt(l_shipdate);
+    row_key.putLong(l_shipdate);
     row_key.putInt(l_orderkey);
     row_key.put(l_linenumber);
     row_key.putInt(l_partkey);
     row_key.putInt(l_suppley);
-    Put put = new Put((ByteBuffer) row_key.rewind());
+    row_key.rewind();
+    Put put = new Put(row_key.array());
 
     put.add(FAMILY_1, L_QUANTITY, Helper.doubleToOrderedBytes(l_quantity));
     put.add(FAMILY_1, L_EXTENDEDPRICE, Helper.doubleToOrderedBytes(l_extendedprice));
@@ -107,7 +124,7 @@ public final class Lineitem extends Configured implements TableCreator, PutBuild
       if (admin.tableExists(tableName)) {
         throw new TableExistsException(tableName);
       }
-      HTableDescriptor tableDesc = new HTableDescriptor(TableName.valueOf(tableName));
+      HTableDescriptor tableDesc = new HTableDescriptor(tableName);
       tableDesc.addFamily(new HColumnDescriptor(FAMILY_1));
       tableDesc.addFamily(new HColumnDescriptor(FAMILY_2));
       admin.createTable(tableDesc, getSplitKeys());
@@ -116,9 +133,9 @@ public final class Lineitem extends Configured implements TableCreator, PutBuild
 
   @SuppressWarnings("deprecation")
   private byte[][] getSplitKeys() {
-    Date firstDate = Date.valueOf(getConf().get("li.first_date", "1992-01-11"));
+    Date firstDate = Date.valueOf(getConf().get("lineitem.first_date", "1992-01-11"));
     firstDate.setDate(1);
-    Date lastDate = Date.valueOf(getConf().get("li.last_date", "1998-12-21"));
+    Date lastDate = Date.valueOf(getConf().get("lineitem.last_date", "1998-12-21"));
     lastDate.setDate(1);
 
     Calendar c = Calendar.getInstance(TimeZone.getTimeZone("GMT"));
@@ -128,10 +145,10 @@ public final class Lineitem extends Configured implements TableCreator, PutBuild
     System.out.println("Calculating split keys.");
     int i = 1;
     while (c.getTime().compareTo(lastDate) < 0) {
-      byte[] bytes = Bytes.toBytes((int)(c.getTimeInMillis() / MILLIS_IN_DAY));
+      byte[] bytes = Bytes.toBytes(c.getTimeInMillis());
       splitKeys.add(bytes);
-      System.out.println(i++ + ". " + Bytes.toStringBinary(bytes));
-      c.add(Calendar.MONTH, 1);
+      //System.out.println(i++ + ". " + Bytes.toStringBinary(bytes));
+      c.add(Calendar.MILLISECOND, 7*24*3600*1000);
     }
 
     System.out.println("Creating table with " + (splitKeys.size()+1) + " regions.");
