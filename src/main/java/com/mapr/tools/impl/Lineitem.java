@@ -93,11 +93,11 @@ public final class Lineitem extends Configured implements TableCreator, PutBuild
     ByteBuffer row_key = ByteBuffer
         .wrap(new byte[8+4+1+4+4]) // 8(l_shipdate) + 4(l_orderkey) + 1(l_linenumber) + 4(l_partkey) + 4(l_suppley)
         .order(ByteOrder.BIG_ENDIAN);
-    row_key.putLong(l_shipdate);
-    row_key.putInt(l_orderkey);
-    row_key.put(l_linenumber);
-    row_key.putInt(l_partkey);
-    row_key.putInt(l_suppley);
+    row_key.putLong(l_shipdate);  // (1, 8)
+    row_key.putInt(l_orderkey);   // (9, 4)
+    row_key.put(l_linenumber);    // (13, 1)
+    row_key.putInt(l_partkey);    // (14, 4)
+    row_key.putInt(l_suppley);    // (18, 4)
     row_key.rewind();
     Put put = new Put(row_key.array());
 
@@ -137,6 +137,7 @@ public final class Lineitem extends Configured implements TableCreator, PutBuild
     firstDate.setDate(1);
     Date lastDate = Date.valueOf(getConf().get("lineitem.last_date", "1998-12-21"));
     lastDate.setDate(1);
+    int inc = getConf().getInt("lineitem.inc", 7);
 
     Calendar c = Calendar.getInstance(TimeZone.getTimeZone("GMT"));
     c.setTime(firstDate);
@@ -148,7 +149,7 @@ public final class Lineitem extends Configured implements TableCreator, PutBuild
       byte[] bytes = Bytes.toBytes(c.getTimeInMillis());
       splitKeys.add(bytes);
       //System.out.println(i++ + ". " + Bytes.toStringBinary(bytes));
-      c.add(Calendar.MILLISECOND, 7*24*3600*1000);
+      c.add(Calendar.MILLISECOND, inc*24*3600*1000);
     }
 
     System.out.println("Creating table with " + (splitKeys.size()+1) + " regions.");
