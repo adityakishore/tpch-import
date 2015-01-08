@@ -1,6 +1,8 @@
 package com.mapr.tools;
 
 import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.conf.Configured;
@@ -28,6 +30,8 @@ public class ImportTPCH extends Configured implements Tool {
 
   public final static String TABLE_TYPE = "importtpch.tabletype";
 
+  public final static String PRINT_VIEW = "importtpch.printview";
+  
   enum Tables {
     LINEITEM,
     ORDERS
@@ -54,7 +58,14 @@ public class ImportTPCH extends Configured implements Tool {
     job.setMapperClass(TPCHMapper.class);
     job.setNumReduceTasks(0);
     TableMapReduceUtil.initTableReducerJob(tableName, null, job);
-    return job.waitForCompletion(true) ? 0 : 1;
+    if (job.waitForCompletion(true)) {
+      if (getConf().getBoolean(PRINT_VIEW, false)) {
+        System.out.println(getViewBuilder(getConf()).getView(tableName+"_view", tableName));
+      }
+      return 0;
+    } else {
+      return 1;
+    }
   }
 
   public static class TPCHMapper extends Mapper<LongWritable, Text, ImmutableBytesWritable, Put> {
@@ -96,18 +107,37 @@ public class ImportTPCH extends Configured implements Tool {
     return (PutBuilder) getObject(conf);
   }
 
+  public static ViewBuilder getViewBuilder(Configuration conf) {
+    return (ViewBuilder) getObject(conf);
+  }
+
+  static Map<Tables, Object> tableObjectMap = new HashMap<Tables, Object>();
+
   private static Object getObject(Configuration conf) {
+    Object obj = null;
     String type = conf.get(TABLE_TYPE);
     try {
-      switch (Tables.valueOf(type.toUpperCase())) {
-      case LINEITEM:
-        return new Lineitem(conf);
-      default:
-        throw new IllegalArgumentException("Invalid table type!!!");
+      Tables table = Tables.valueOf(type.toUpperCase());
+      obj = tableObjectMap.get(table);
+      if (obj == null) {
+        synchronized (tableObjectMap) {
+          obj = tableObjectMap.get(table);
+          if (obj == null) {
+            switch (table) {
+            case LINEITEM:
+              obj = new Lineitem(conf);
+              break;
+            default:
+              throw new IllegalArgumentException("Unsupported table type!!!");
+            }
+            tableObjectMap.put(table, obj);
+          }
+        }
       }
     } catch (Throwable t) {
-      throw new IllegalArgumentException("Invalid table type: " + type);
+      throw new IllegalArgumentException("Invalid table type: " + type, t);
     }
+    return obj;
   }
 
 }

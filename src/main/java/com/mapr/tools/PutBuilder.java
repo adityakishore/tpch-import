@@ -8,6 +8,6 @@ import com.mapr.tools.impl.TsvParser.ParsedLine;
 
 public interface PutBuilder {
 
-  abstract public Put build(ParsedLine parsed) throws IOException;
+  public Put build(ParsedLine parsed) throws IOException;
 
 }

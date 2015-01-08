@@ -21,10 +21,12 @@ import com.mapr.tools.Constants;
 import com.mapr.tools.Helper;
 import com.mapr.tools.PutBuilder;
 import com.mapr.tools.TableCreator;
+import com.mapr.tools.ViewBuilder;
 import com.mapr.tools.impl.TsvParser.ParsedLine;
 
-public final class Lineitem extends Configured implements TableCreator, PutBuilder, Constants {
+public final class Lineitem extends Configured implements TableCreator, PutBuilder, ViewBuilder, Constants {
 
+  private static final String USE_FULL_COLUMNS = "lineitem.full_columns";
   private static final byte[] FAMILY_1 = "F".getBytes();
   private static final byte[] FAMILY_2 = "G".getBytes();
 
@@ -53,7 +55,7 @@ public final class Lineitem extends Configured implements TableCreator, PutBuild
   public Lineitem(Configuration conf) {
     super(conf);
 
-    if (getConf().getBoolean("lineitem.full_columns", false)) {
+    if (getConf().getBoolean(USE_FULL_COLUMNS, false)) {
       COLUMNS = FULL_COLUMNS;
     } else {
       COLUMNS = SHORT_COLUMNS;
@@ -71,6 +73,43 @@ public final class Lineitem extends Configured implements TableCreator, PutBuild
     L_COMMENT = COLUMNS[10].getBytes();
   }
 
+  @Override
+  public String getView(String viewName, String tableName) {
+    return String.format("create view %s as \n" +
+        "select\n" +
+        "    convert_from(byte_substr(lineitem.row_key, 9, 4), 'int_be') as l_orderkey,\n" +
+        "    convert_from(byte_substr(lineitem.row_key, 14, 4), 'int_be') as l_partkey,\n" +
+        "    convert_from(byte_substr(lineitem.row_key, 18, 4), 'int_be') as l_suppkey,\n" +
+        "    convert_from(byte_substr(lineitem.row_key, 13, 1), 'tinyint') as l_linenumber,\n" +
+        "    convert_from(lineitem.F.%s, 'double_be') as l_quantity,\n" +
+        "    convert_from(lineitem.F.%s, 'double_be') as l_extendedprice,\n" +
+        "    convert_from(lineitem.F.%s, 'double_be') as l_discount,\n" +
+        "    convert_from(lineitem.F.%s, 'double_be') as l_tax,\n" +
+        "    convert_from(lineitem.F.%s, 'utf8') as l_returnflag,\n" +
+        "    convert_from(lineitem.F.%s, 'utf8') as l_linestatus,\n" +
+        "    convert_from(byte_substr(lineitem.row_key, 1, 8), 'date_epoch_be') as l_shipdate,\n" +
+        "    convert_from(lineitem.F.%s, 'date_epoch_be') l_commitdate,\n" +
+        "    convert_from(lineitem.F.%s, 'date_epoch_be') l_receiptdate,\n" +
+        "    convert_from(lineitem.F.%s, 'utf8') as l_shipinstruct,\n" +
+        "    convert_from(lineitem.F.%s, 'utf8') as l_shipmode,\n" +
+        "    convert_from(lineitem.G.%s, 'utf8') as l_comment\n" +
+        "from %s lineitem;",
+        viewName,
+        COLUMNS[0],
+        COLUMNS[1],
+        COLUMNS[2],
+        COLUMNS[3],
+        COLUMNS[4],
+        COLUMNS[5],
+        COLUMNS[6],
+        COLUMNS[7],
+        COLUMNS[8],
+        COLUMNS[9],
+        COLUMNS[10],
+        tableName);
+  }
+
+  @Override
   public Put build(ParsedLine parsed) {
     int    l_orderkey       = Integer.valueOf(parsed.getColumn(0));
     int    l_partkey        = Integer.valueOf(parsed.getColumn(1));
@@ -131,24 +170,19 @@ public final class Lineitem extends Configured implements TableCreator, PutBuild
     }
   }
 
-  @SuppressWarnings("deprecation")
   private byte[][] getSplitKeys() {
-    Date firstDate = Date.valueOf(getConf().get("lineitem.first_date", "1992-01-11"));
-    firstDate.setDate(1);
-    Date lastDate = Date.valueOf(getConf().get("lineitem.last_date", "1998-12-21"));
-    lastDate.setDate(1);
-    int inc = getConf().getInt("lineitem.inc", 7);
+    Date firstDate = Date.valueOf(getConf().get("lineitem.first_date", "1992-01-1"));
+    Date lastDate = Date.valueOf(getConf().get("lineitem.last_date", "1998-12-31"));
+    int inc = getConf().getInt("lineitem.inc_day", 2);
 
     Calendar c = Calendar.getInstance(TimeZone.getTimeZone("GMT"));
     c.setTime(firstDate);
 
     ArrayList<byte[]> splitKeys = new ArrayList<byte[]>();
     System.out.println("Calculating split keys.");
-    int i = 1;
     while (c.getTime().compareTo(lastDate) < 0) {
       byte[] bytes = Bytes.toBytes(c.getTimeInMillis());
       splitKeys.add(bytes);
-      //System.out.println(i++ + ". " + Bytes.toStringBinary(bytes));
       c.add(Calendar.MILLISECOND, inc*24*3600*1000);
     }
 
@@ -157,7 +191,9 @@ public final class Lineitem extends Configured implements TableCreator, PutBuild
   }
 
   public static void main(String[] args) {
-    new Lineitem().getSplitKeys();
+    Configuration conf = HBaseConfiguration.create();
+    conf.setBoolean(USE_FULL_COLUMNS, true);
+    System.out.println(new Lineitem(conf).getView("x", "y"));
   }
 
 }
